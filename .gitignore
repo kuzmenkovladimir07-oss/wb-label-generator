@@ -1,0 +1,14 @@
+node_modules
+dist
+.DS_Store
+*.local
+.vite
+
+# шрифт генерируется prebuild-скриптом (scripts/build-font.mjs)
+src/lib/font.ts
+
+# артефакты предпросмотра из инструментов разработки
+.playwright-mcp
+ref-full.png
+*.png
+*.pdf
