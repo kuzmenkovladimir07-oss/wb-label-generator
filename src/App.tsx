@@ -11,16 +11,15 @@ const newId = () => `f-${++idCounter}`
 
 const initialItems: LabelItem[] = [
   { id: newId(), kind: 'text', name: 'Название', value: 'Футболка хлопок, чёрная', showName: false },
-  { id: newId(), kind: 'barcode', name: 'Штрих-код', value: '2003421249001', showName: false },
   { id: newId(), kind: 'text', name: 'Артикул', value: 'А1301', showName: true },
+  { id: newId(), kind: 'barcode', name: 'Штрих-код', value: '2003421249001', showName: false },
 ]
 
 const initialSettings: LabelSettings = {
-  preset: '58x40',
-  ...PRESETS['58x40'],
-  fontSize: 9,
+  preset: '43x25',
+  ...PRESETS['43x25'],
+  fontSize: 8,
   format: 'EAN13',
-  copies: 1,
 }
 
 export default function App() {
@@ -79,11 +78,7 @@ export default function App() {
               Скачать PDF ↓
             </button>
             <span className="count">
-              {printable
-                ? settings.copies > 1
-                  ? `Копий в PDF: ${settings.copies}`
-                  : 'Одна этикетка в PDF'
-                : 'Заполните хотя бы одно поле'}
+              {printable ? 'Этикетка готова к печати' : 'Заполните хотя бы одно поле'}
             </span>
           </div>
         </div>
