@@ -1,5 +1,5 @@
 import JsBarcode from 'jsbarcode'
-import type { Row, LabelSettings } from '../types'
+import type { LabelItem, LabelSettings } from '../types'
 
 // Рендерим этикетку на canvas в высоком DPI (300), чтобы при печати на
 // термопринтере было чётко. Текст рисуем средствами Canvas 2D — кириллица
@@ -14,44 +14,35 @@ export function isValidEan13(value: string): boolean {
   return /^\d{12,13}$/.test(value.trim())
 }
 
-/** Подбираем px-шрифт так, чтобы текст уложился в maxLines строк по ширине maxW. */
-function wrapToLines(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxW: number,
-  font: (px: number) => string,
-  basePx: number,
-  maxLines: number,
-): { lines: string[]; px: number } {
-  const words = text.split(/\s+/).filter(Boolean)
-  if (words.length === 0) return { lines: [], px: basePx }
+type ItemKindResolved = 'text' | 'barcode'
 
-  for (let px = basePx; px >= Math.round(basePx * 0.55); px -= 1) {
-    ctx.font = font(px)
-    const lines: string[] = []
-    let current = ''
-    let overflow = false
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word
-      if (ctx.measureText(candidate).width <= maxW) {
-        current = candidate
-      } else {
-        if (current) lines.push(current)
-        current = word
-        // одно слово шире строки — на этом размере не помещается
-        if (ctx.measureText(current).width > maxW) {
-          overflow = true
-          break
-        }
-      }
+interface Rend {
+  kind: ItemKindResolved
+  text?: string
+  value?: string
+}
+
+/** Превращаем поля в то, что реально рисуется: пустые текстовые поля пропускаем. */
+function buildRends(items: LabelItem[]): Rend[] {
+  const out: Rend[] = []
+  for (const it of items) {
+    if (it.kind === 'barcode') {
+      out.push({ kind: 'barcode', value: it.value })
+      continue
     }
-    if (current) lines.push(current)
-    if (!overflow && lines.length <= maxLines) return { lines, px }
+    const v = it.value.trim()
+    if (!v) continue
+    const name = it.name.trim()
+    const text = it.showName && name ? `${name}: ${v}` : v
+    out.push({ kind: 'text', text })
   }
+  return out
+}
 
-  // не уместилось даже на минимальном размере — обрезаем с многоточием
-  const px = Math.round(basePx * 0.55)
-  ctx.font = font(px)
+/** Жадно разбиваем текст на строки по ширине maxW при текущем ctx.font. */
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return []
   const lines: string[] = []
   let current = ''
   for (const word of words) {
@@ -59,33 +50,71 @@ function wrapToLines(
     if (ctx.measureText(candidate).width <= maxW) {
       current = candidate
     } else {
-      if (lines.length >= maxLines - 1) break
       if (current) lines.push(current)
       current = word
     }
   }
-  if (current && lines.length < maxLines) lines.push(current)
-  if (lines.length === maxLines) {
-    let last = lines[maxLines - 1]
-    while (last && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1)
-    lines[maxLines - 1] = last + '…'
-  }
-  return { lines, px }
+  if (current) lines.push(current)
+  return lines
 }
 
-/** Текст в одну строку: ужимаем шрифт, чтобы влезло по ширине. */
-function fitOneLine(
+/** Обрезаем до maxLines строк, последнюю при необходимости с многоточием. */
+function capLines(
   ctx: CanvasRenderingContext2D,
-  text: string,
+  lines: string[],
   maxW: number,
-  font: (px: number) => string,
-  basePx: number,
-): number {
-  for (let px = basePx; px >= Math.round(basePx * 0.5); px -= 1) {
-    ctx.font = font(px)
-    if (ctx.measureText(text).width <= maxW) return px
-  }
-  return Math.round(basePx * 0.5)
+  maxLines: number,
+): string[] {
+  if (lines.length <= maxLines) return lines
+  const capped = lines.slice(0, maxLines)
+  let last = capped[maxLines - 1]
+  while (last && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1)
+  capped[maxLines - 1] = last + '…'
+  return capped
+}
+
+interface Prepared {
+  kind: ItemKindResolved
+  lines?: string[]
+  value?: string
+  h: number
+}
+
+interface Layout {
+  prepared: Prepared[]
+  fits: boolean
+}
+
+/** Раскладка при заданном размере шрифта: текст занимает свою высоту, штрих-код — остаток. */
+function layoutAt(
+  ctx: CanvasRenderingContext2D,
+  rends: Rend[],
+  fontPx: number,
+  innerW: number,
+  availH: number,
+  gap: number,
+): Layout {
+  const lineH = Math.round(fontPx * 1.25)
+  let textH = 0
+  const prepared: Prepared[] = rends.map((r) => {
+    if (r.kind === 'text') {
+      ctx.font = `${fontPx}px Arial, sans-serif`
+      const lines = capLines(ctx, wrapLines(ctx, r.text ?? '', innerW), innerW, 2)
+      const h = lines.length * lineH
+      textH += h
+      return { kind: 'text' as const, lines, h }
+    }
+    return { kind: 'barcode' as const, value: r.value, h: 0 }
+  })
+
+  const gaps = gap * Math.max(0, rends.length - 1)
+  const minBarcodeH = Math.max(mm(8), Math.round(availH * 0.28))
+  let barcodeH = availH - textH - gaps
+  const fits = barcodeH >= minBarcodeH
+  if (!fits) barcodeH = minBarcodeH
+  for (const p of prepared) if (p.kind === 'barcode') p.h = barcodeH
+
+  return { prepared, fits }
 }
 
 function drawBarcode(
@@ -142,7 +171,10 @@ function drawBarcode(
   ctx.drawImage(tmp, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
 }
 
-export function renderLabelToCanvas(row: Row, settings: LabelSettings): HTMLCanvasElement {
+export function renderLabelToCanvas(
+  items: LabelItem[],
+  settings: LabelSettings,
+): HTMLCanvasElement {
   const W = mm(settings.widthMm)
   const H = mm(settings.heightMm)
   const canvas = document.createElement('canvas')
@@ -156,42 +188,41 @@ export function renderLabelToCanvas(row: Row, settings: LabelSettings): HTMLCanv
 
   const pad = mm(2)
   const innerW = W - pad * 2
-  // размер шрифта трактуем как пункты (pt) при печати и переводим в пиксели 300 dpi
-  const basePx = Math.round((settings.fontSize * DPI) / 72)
+  const availH = H - pad * 2
+  const gap = mm(1.2)
 
-  const boldFont = (px: number) => `bold ${px}px Arial, sans-serif`
-  const regFont = (px: number) => `${px}px Arial, sans-serif`
+  const rends = buildRends(items)
 
-  // --- Название (сверху, до 2 строк) ---
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'top'
-  const name = row.name.trim()
-  const { lines, px: namePx } = wrapToLines(ctx, name, innerW, boldFont, basePx, 2)
-  ctx.font = boldFont(namePx)
-  const lineH = Math.round(namePx * 1.2)
+  // подбираем самый крупный размер шрифта, при котором всё помещается
+  const maxPx = Math.round((settings.fontSize * DPI) / 72)
+  const minPx = Math.max(8, Math.round(maxPx * 0.45))
+  let chosen = layoutAt(ctx, rends, maxPx, innerW, availH, gap)
+  let fontPx = maxPx
+  for (let px = maxPx; px >= minPx; px -= 1) {
+    const l = layoutAt(ctx, rends, px, innerW, availH, gap)
+    chosen = l
+    fontPx = px
+    if (l.fits) break
+  }
+
+  const lineH = Math.round(fontPx * 1.25)
   let y = pad
-  for (const line of lines) {
-    ctx.fillText(line, W / 2, y)
-    y += lineH
+  for (const p of chosen.prepared) {
+    if (p.kind === 'text') {
+      ctx.font = `${fontPx}px Arial, sans-serif`
+      ctx.fillStyle = '#000'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      for (const line of p.lines ?? []) {
+        ctx.fillText(line, W / 2, y)
+        y += lineH
+      }
+    } else {
+      drawBarcode(ctx, p.value ?? '', settings, pad, y, innerW, p.h)
+      y += p.h
+    }
+    y += gap
   }
-  const nameBottom = lines.length ? y : pad
-
-  // --- Артикул (снизу) ---
-  const article = row.article.trim()
-  let articleTop = H - pad
-  if (article) {
-    const aPx = fitOneLine(ctx, article, innerW, regFont, basePx)
-    ctx.font = regFont(aPx)
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(article, W / 2, H - pad)
-    articleTop = H - pad - aPx * 1.2
-  }
-
-  // --- Штрих-код (по центру, заполняет оставшееся место) ---
-  const bcTop = nameBottom + mm(1)
-  const bcBottom = articleTop - mm(1)
-  const bcAreaH = Math.max(bcBottom - bcTop, mm(6))
-  drawBarcode(ctx, row.barcode, settings, pad, bcTop, innerW, bcAreaH)
 
   return canvas
 }
