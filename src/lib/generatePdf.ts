@@ -1,35 +1,31 @@
 import { jsPDF } from 'jspdf'
-import type { Row, LabelSettings } from '../types'
+import type { LabelItem, LabelSettings } from '../types'
 import { renderLabelToCanvas } from './renderLabel'
 
-/** Считаем строку «печатаемой», если задан хотя бы штрих-код или название. */
-export function isPrintable(row: Row): boolean {
-  return Boolean(row.barcode.trim() || row.name.trim() || row.article.trim())
+/** Этикетку есть смысл печатать, если задан штрих-код или хотя бы одно значение. */
+export function isPrintable(items: LabelItem[]): boolean {
+  return items.some((it) => it.value.trim())
 }
 
 /**
- * Собирает PDF: одна этикетка = одна страница точного размера в мм.
- * Каждая страница — картинка этикетки, отрисованной на canvas, на весь лист.
+ * Собирает PDF из одной этикетки в нужном количестве копий.
+ * Одна копия = одна страница точного размера в мм (картинка с canvas на весь лист).
  */
-export function generatePdf(rows: Row[], settings: LabelSettings): void {
-  const printable = rows.filter(isPrintable)
-  if (printable.length === 0) return
+export function generatePdf(items: LabelItem[], settings: LabelSettings): void {
+  if (!isPrintable(items)) return
 
+  const copies = Math.max(1, Math.round(settings.copies) || 1)
   const { widthMm, heightMm } = settings
   const orientation = widthMm >= heightMm ? 'landscape' : 'portrait'
 
-  const pdf = new jsPDF({
-    unit: 'mm',
-    format: [widthMm, heightMm],
-    orientation,
-  })
+  // этикетка одна — рисуем canvas один раз и повторяем на всех страницах
+  const dataUrl = renderLabelToCanvas(items, settings).toDataURL('image/png')
 
-  printable.forEach((row, index) => {
-    if (index > 0) pdf.addPage([widthMm, heightMm], orientation)
-    const canvas = renderLabelToCanvas(row, settings)
-    const dataUrl = canvas.toDataURL('image/png')
+  const pdf = new jsPDF({ unit: 'mm', format: [widthMm, heightMm], orientation })
+  for (let i = 0; i < copies; i += 1) {
+    if (i > 0) pdf.addPage([widthMm, heightMm], orientation)
     pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm)
-  })
+  }
 
   pdf.save('etiketki.pdf')
 }
