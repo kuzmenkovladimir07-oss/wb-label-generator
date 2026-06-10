@@ -87,15 +87,27 @@ export default function LabelSettingsPanel({ settings, onChange }: Props) {
         )}
       </div>
 
-      <div className="field">
-        <label>Размер шрифта</label>
-        <input
-          type="number"
-          min={4}
-          max={20}
-          value={settings.fontSize}
-          onChange={(e) => onChange({ fontSize: Number(e.target.value) || 6 })}
-        />
+      <div className="field custom-size">
+        <div>
+          <label>Размер шрифта</label>
+          <input
+            type="number"
+            min={4}
+            max={20}
+            value={settings.fontSize}
+            onChange={(e) => onChange({ fontSize: Number(e.target.value) || 6 })}
+          />
+        </div>
+        <div>
+          <label>Копий в PDF</label>
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            value={settings.copies}
+            onChange={(e) => onChange({ copies: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </div>
       </div>
     </section>
   )
