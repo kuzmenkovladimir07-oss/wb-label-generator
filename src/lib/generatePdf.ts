@@ -11,6 +11,32 @@ export function isPrintable(items: LabelItem[]): boolean {
   return items.some((it) => it.value.trim())
 }
 
+/** Убираем из имени файла символы, недопустимые в Windows/macOS. */
+function sanitizeFileName(name: string): string {
+  return name
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100)
+}
+
+/**
+ * Имя PDF = значение поля «Артикул». Если его нет — берём первое непустое
+ * текстовое поле, иначе «etiketki».
+ */
+export function pdfFileName(items: LabelItem[]): string {
+  const article = items.find(
+    (it) => it.kind === 'text' && it.name.trim().toLowerCase() === 'артикул' && it.value.trim(),
+  )
+  let base = article ? article.value : ''
+  if (!base.trim()) {
+    const firstText = items.find((it) => it.kind === 'text' && it.value.trim())
+    base = firstText ? firstText.value : ''
+  }
+  const clean = sanitizeFileName(base)
+  return `${clean || 'etiketki'}.pdf`
+}
+
 function registerFont(pdf: jsPDF) {
   pdf.addFileToVFS('WBLabel.ttf', LABEL_FONT_TTF_BASE64)
   pdf.addFont('WBLabel.ttf', FONT_NAME, 'normal')
@@ -89,5 +115,5 @@ export function generatePdf(items: LabelItem[], settings: LabelSettings): void {
     }
   }
 
-  pdf.save('etiketki.pdf')
+  pdf.save(pdfFileName(items))
 }
