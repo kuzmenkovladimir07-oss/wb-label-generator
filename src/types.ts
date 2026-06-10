@@ -1,8 +1,19 @@
-export interface Row {
+export type ItemKind = 'barcode' | 'text'
+
+/**
+ * Этикетка — это упорядоченный список полей. Порядок в списке = порядок строк
+ * сверху вниз на самой этикетке. Ровно одно поле имеет kind='barcode' и рисуется
+ * как штрих-код; остальные — текстовые строки.
+ */
+export interface LabelItem {
   id: string
-  barcode: string
+  kind: ItemKind
+  /** Название поля (для текстовых — редактируется, напр. «Цвет»). */
   name: string
-  article: string
+  /** Значение поля (для штрих-кода — кодируемое значение). */
+  value: string
+  /** Показывать ли «Название: значение» вместо просто «значение» (только текст). */
+  showName: boolean
 }
 
 export type SizePreset = '43x25' | '58x40' | 'custom'
@@ -15,6 +26,8 @@ export interface LabelSettings {
   heightMm: number
   fontSize: number
   format: BarcodeFormat
+  /** Сколько одинаковых копий этикетки положить в PDF. */
+  copies: number
 }
 
 export const PRESETS: Record<Exclude<SizePreset, 'custom'>, { widthMm: number; heightMm: number }> = {
